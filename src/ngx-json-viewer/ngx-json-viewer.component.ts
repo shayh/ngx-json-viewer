@@ -1,4 +1,4 @@
-import { Component, OnChanges, Input } from '@angular/core';
+import {ChangeDetectionStrategy, Component, EventEmitter, Input, Output} from '@angular/core';
 
 export interface Segment {
   key: string;
@@ -6,37 +6,53 @@ export interface Segment {
   type: undefined | string;
   description: string;
   expanded: boolean;
+  found?: boolean;
 }
 
 @Component({
   selector: 'ngx-json-viewer',
   templateUrl: './ngx-json-viewer.component.html',
-  styleUrls: ['./ngx-json-viewer.component.scss']
+  styleUrls: ['./ngx-json-viewer.component.scss'],
+  changeDetection: ChangeDetectionStrategy.OnPush
 })
-export class NgxJsonViewerComponent implements OnChanges {
+export class NgxJsonViewerComponent {
 
-  @Input() json: any;
-  @Input() expanded = true;
   @Input() depth = -1;
 
   @Input() _currentDepth = 0;
-
-  segments: Segment[] = [];
-
-  ngOnChanges() {
+  @Input() set json(json: any) {
     this.segments = [];
-
-    // remove cycles
-    this.json = this.decycle(this.json);
-
-    if (typeof this.json === 'object') {
-      Object.keys(this.json).forEach(key => {
-        this.segments.push(this.parseKeyValue(key, this.json[key]));
-      });
-    } else {
-      this.segments.push(this.parseKeyValue(`(${typeof this.json})`, this.json));
+    if (json) {
+      this.isArray = Array.isArray(json);
+      if (typeof json === 'object') {
+        Object.keys(json).forEach(key => {
+          this.segments.push(this.parseKeyValue(key, json[key]));
+        });
+      } else {
+        this.segments.push(this.parseKeyValue(`(${typeof json})`, json));
+      }
     }
   }
+
+  @Input() expanded;
+  get search() {
+    return this._search;
+  }
+  @Input() set search(val: string) {
+    this._search = val;
+    this.segments.forEach(segment => {
+      segment.found = !!val && segment.description.includes(val);
+    });
+  }
+  @Input() testLink?: (str: string) => boolean;
+  @Output() linkAction = new EventEmitter<string>();
+
+  private _search: string = null;
+  segments: Segment[] = [];
+  public isArray: boolean;
+  public indexes: number[] = [];
+  public index: number = 0;
+  public stringify = JSON.stringify;
 
   isExpandable(segment: Segment) {
     return segment.type === 'object' || segment.type === 'array';
@@ -50,8 +66,8 @@ export class NgxJsonViewerComponent implements OnChanges {
 
   private parseKeyValue(key: any, value: any): Segment {
     const segment: Segment = {
-      key: key,
-      value: value,
+      key,
+      value,
       type: undefined,
       description: '' + value,
       expanded: this.isExpanded()
@@ -71,8 +87,13 @@ export class NgxJsonViewerComponent implements OnChanges {
         break;
       }
       case 'string': {
-        segment.type = 'string';
-        segment.description = '"' + segment.value + '"';
+        if (this.testLink !== undefined && this.testLink(segment.value)) {
+          segment.type = 'link';
+          segment.description = segment.value;
+        } else {
+          segment.type = 'string';
+          segment.description = '"' + segment.value + '"';
+        }
         break;
       }
       case 'undefined': {
@@ -148,5 +169,20 @@ export class NgxJsonViewerComponent implements OnChanges {
       }
       return value;
     }(object, '$'));
+  }
+
+  linkActionWrapper(event: Event, link: string) {
+    event.preventDefault();
+    this.linkAction.emit(link);
+  }
+
+  subsectionAction(link: string) {
+    this.linkAction.emit(link);
+  }
+
+  split(line: string, search: string) {
+    const regex = new RegExp(search, 'gi');
+    const match = line.match(regex);
+    return line.split(regex).map( (part, i) => [part, match?.[i]]);
   }
 }
